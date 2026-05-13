@@ -1,9 +1,9 @@
 import argparse
 import hashlib
-from asyncio import Future, run, to_thread, sleep, get_running_loop, run_coroutine_threadsafe
+from asyncio import run, to_thread, sleep
 from dataclasses import dataclass
 import time
-from threading import Thread
+from messages import *
 
 from ipv8.community import Community, CommunitySettings
 from ipv8.configuration import ConfigBuilder, Strategy, WalkerDefinition, default_bootstrap_defs
@@ -21,26 +21,49 @@ AYKUT_PUBLIC_KEY = bytes.fromhex(
     "4c69624e61434c504b3ad8e3c43d2221dcef7f94eb20d566afeba009e90eb999d69511ebcbf369a3303895c92c299356298f6f115c26fb14ad994347b8447ac028640344b0abc34221cd"
 )
 AISTE_PUBLIC_KEY = bytes.fromhex(
-    ""
+    "4c69624e61434c504b3a4924a5ac3d83e3128007c5a349dcbda9396f45fc0331f4cd84cf5b7ec3f7b20339cafc465a0f36ddb65c4295953d01327921d7ab4ea5a7e69dcb5e16b96e0ca3"
 )
+ME_PUBLIC_KEY = None
 
-# Global reference to the community for main thread access
-ipv8_instance = None
-client_loop = None
+# Response compilations
+_ = ResponseMessage(False, "", "")
+
+# Global references
+server_peer = None
 
 class DelftCommunity(Community):
     community_id = COMMUNITY_ID
 
     def __init__(self, settings: CommunitySettings) -> None:
         super().__init__(settings)
+        self.add_message_handler(ResponseMessage, self.on_response)
+        self.add_message_handler(ChallengeResponseMessage, self.on_challenge_response)
 
-    def started(self) -> None:
-        # self.register_task("hashable1", self.create_submission_bundle, interval=1, delay=0)
-        pass
-    
-    # Things to do
+    # === RESPONSE HANDLERS ===
+    @lazy_wrapper(ResponseMessage)
+    def on_response(self, peer: Peer, payload: ResponseMessage) -> None:
+        print(f"Response from {peer}: \n\tsuccess={payload.success}, \n\tgroup_id={payload.group_id}, \n\tmessage={payload.message}\n")
+        if peer != server_peer:
+            return
+
+        payload = ChallengeRequestMessage(group_id=payload.group_id)
+        self.ez_send(server_peer, payload)
+
+    @lazy_wrapper(ChallengeResponseMessage)
+    def on_challenge_response(self, peer: Peer, payload: ChallengeResponseMessage) -> None:
+        print(f"Challenge response from {peer}: \n\tnonce={payload.nonce.hex()}, \n\tround_number={payload.round_number}, \n\tdeadline={time.ctime(payload.deadline)}\n")
+        if peer != server_peer:
+            return
+
+    # === MENU OPTIONS ===
     async def create_submission_bundle(self) -> None:
-        pass
+        payload = GroupRegistrationMessage(
+            pk1=ME_PUBLIC_KEY,
+            pk2=AYKUT_PUBLIC_KEY,
+            pk3=AISTE_PUBLIC_KEY
+        )
+        print(server_peer)
+        self.ez_send(server_peer, payload)
 
     async def get_my_key(self) -> None:
         print(self.my_peer.key.pub().key_to_bin().hex(), "\n")
@@ -48,13 +71,29 @@ class DelftCommunity(Community):
     async def find_peers(self) -> None:
         print(f"=== Peers {len(self.get_peers())} === {time.ctime()} ===")
         for peer in self.get_peers():
-            print(peer, peer.public_key.key_to_bin().hex()[-30:])
+            print(peer, peer.public_key.key_to_bin().hex())
         print("\n")
 
-async def start_client() -> None:
-    global ipv8_instance, client_loop
+
+    # Starting function
+    async def started(self) -> None:
+        global ME_PUBLIC_KEY, server_peer
+        ME_PUBLIC_KEY = self.my_peer.key.pub().key_to_bin()
+
+        attempts = 0
+        while server_peer is None:
+            await sleep(0.1)
+            for peer in self.get_peers():
+                if peer.public_key.key_to_bin() == SERVER_PUBLIC_KEY:
+                    server_peer = peer
+                    print(f"Found server peer: {server_peer} after {attempts} attempts")
+                    break
+            attempts += 1
+            if attempts % 50 == 0:
+                print(f"{attempts} attempts")
     
-    client_loop = get_running_loop()
+
+async def start_client() -> None:
     builder = ConfigBuilder().clear_keys().clear_overlays()
     builder.add_key("client", "curve25519", "../client.pem")
     builder.add_overlay(
@@ -70,30 +109,33 @@ async def start_client() -> None:
     )
     await ipv8_instance.start()
 
-    await sleep(float('inf'))
+    # Wait for community to be initialized
+    community = None
+    for overlay in ipv8_instance.overlays:
+        if isinstance(overlay, DelftCommunity):
+            community = overlay
+            break
 
-def _run_client_loop() -> None:
-    run(start_client())
+    # Main menu loop
+    while True:
+        print("1. Get my public key")
+        print("2. Find peers")
+        print("3. Create submission bundle")
+        choice = 2
+        try:
+            choice = int(input(""))
+        except:
+            pass
+        match choice:
+            case 1:
+                await community.get_my_key()
+            case 2:
+                await community.find_peers()
+            case 3:
+                await community.create_submission_bundle()
+            case _: 
+                exit(0)
+        await sleep(1)
 
-client_thread = Thread(target=_run_client_loop, name="client-thread", daemon=True)
-client_thread.start()
 
-time.sleep(1)
-community = None
-for overlay in ipv8_instance.overlays:
-    if isinstance(overlay, DelftCommunity):
-        community = overlay
-        break
-
-while True:
-    print("1. Get my public key")
-    print("2. Find peers")
-    choice = int(input(""))
-    match choice:
-        case 1:
-            run_coroutine_threadsafe(community.get_my_key(), client_loop)
-        case 2:
-            run_coroutine_threadsafe(community.find_peers(), client_loop)
-        case _: 
-            exit(0)
-    time.sleep(1)        
+run(start_client())

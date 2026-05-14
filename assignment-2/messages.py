@@ -59,3 +59,8 @@ class SignedMessage(DataClassPayload[8]):
 @dataclass
 class StartRoundMessage(DataClassPayload[9]):
     round_number: int
+
+
+@dataclass
+class RegisterPeersMessage(DataClassPayload[10]):
+    pass

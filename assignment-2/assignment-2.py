@@ -69,6 +69,7 @@ class DelftCommunity(Community):
         self.add_message_handler(ChallengeResponseMessage, self.on_challenge_response)
         self.add_message_handler(PleaseSignMessage, self.on_please_sign)
         self.add_message_handler(SignedMessage, self.on_signed_message)
+        self.add_message_handler(RegisterPeersMessage, self.on_register_peers)
         self.add_message_handler(RoundResultMessage, self.on_round_result)
         self.add_message_handler(StartRoundMessage, self.on_start_round)
 
@@ -120,6 +121,12 @@ class DelftCommunity(Community):
             )
             self.ez_send(server_peer, request)
 
+    @lazy_wrapper(RegisterPeersMessage)
+    async def on_register_peers(
+        self, peer: Peer, payload: RegisterPeersMessage
+    ) -> None:
+        await self.find_peers()
+
     @lazy_wrapper(RoundResultMessage)
     def on_round_result(self, peer: Peer, payload: RoundResultMessage) -> None:
         print(
@@ -143,6 +150,10 @@ class DelftCommunity(Community):
     async def create_submission_bundle(self) -> None:
         await self.find_peers()
         if curr_round_number == 0 and my_round != 1:
+            for teammate in team_peers:
+                if teammate is not None:
+                    self.ez_send(teammate, RegisterPeersMessage())
+            await sleep(1)
             self.ez_send(
                 team_peers[0],
                 StartRoundMessage(round_number=1),

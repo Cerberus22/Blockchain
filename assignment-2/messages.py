@@ -48,8 +48,14 @@ class RoundResultMessage(DataClassPayload[6]):
 @dataclass
 class PleaseSignMessage(DataClassPayload[7]):
     to_sign: bytes
+    curr_round_number: int
 
 
 @dataclass
 class SignedMessage(DataClassPayload[8]):
     signature: bytes
+
+
+@dataclass
+class StartRoundMessage(DataClassPayload[9]):
+    round_number: int

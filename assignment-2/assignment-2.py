@@ -31,6 +31,7 @@ AYKUT_PUBLIC_KEY = bytes.fromhex(
 YURIAN_PUBLIC_KEY = bytes.fromhex(
     "4c69624e61434c504b3afbc497359b4d8bc2d70fc55a3261ad831872055bd13bca87379be73cf9246e1611d4b25ac771d74cc8628d2c44c85f5de40aa9c79f2d6e9901a967063b621fc4"
 )
+ME_PUBLIC_KEY = None
 
 team_keys = [AISTE_PUBLIC_KEY, AYKUT_PUBLIC_KEY, YURIAN_PUBLIC_KEY]
 
@@ -84,7 +85,7 @@ class DelftCommunity(Community):
     @lazy_wrapper(PleaseSignMessage)
     def on_please_sign(self, peer: Peer, payload: PleaseSignMessage) -> None:
         print(f"Please sign from {peer}: \n\tto_sign={payload.to_sign.hex()}\n")
-        signature = self.my_peer.key.sign(payload.to_sign)
+        signature = self.my_peer.key.signature(payload.to_sign)
         self.ez_send(peer, SignedMessage(signature))
 
     @lazy_wrapper(SignedMessage)
@@ -100,7 +101,7 @@ class DelftCommunity(Community):
 
     async def create_submission_bundle(self) -> None:
         payload = GroupRegistrationMessage(
-            pk1=ME_PUBLIC_KEY, pk2=AYKUT_PUBLIC_KEY, pk3=AISTE_PUBLIC_KEY
+            pk1=AISTE_PUBLIC_KEY, pk2=AYKUT_PUBLIC_KEY, pk3=YURIAN_PUBLIC_KEY
         )
         print(server_peer)
         self.ez_send(server_peer, payload)
@@ -133,19 +134,9 @@ class DelftCommunity(Community):
         global ME_PUBLIC_KEY, server_peer
         ME_PUBLIC_KEY = self.my_peer.key.pub().key_to_bin()
 
-        attempts = 0
-        while server_peer is None:
-            await sleep(1)
-            for peer in self.get_peers():
-                if peer.public_key.key_to_bin() == SERVER_PUBLIC_KEY:
-                    server_peer = peer
-                    print(f"Found server peer: {server_peer} after {attempts} attempts")
-                    break
-            attempts += 1
-            print(f"{attempts} attempts: {len(self.get_peers())} peers")
-
 
 async def start_client() -> None:
+    global server_peer
     builder = ConfigBuilder().clear_keys().clear_overlays()
     builder.add_key("client", "curve25519", f"../{keyfile}.pem")
     builder.add_overlay(
@@ -167,6 +158,18 @@ async def start_client() -> None:
         if isinstance(overlay, DelftCommunity):
             community = overlay
             break
+
+    attempts = 0
+    while server_peer is None:
+        attempts += 1
+        await sleep(1)
+        for peer in community.get_peers():
+            if peer.public_key.key_to_bin() == SERVER_PUBLIC_KEY:
+                server_peer = peer
+                print(f"Found server peer: {server_peer} after {attempts} attempts")
+                break
+        if server_peer is None:
+            print(f"{attempts} attempts: {len(community.get_peers())} peers")
 
     # Main menu loop
     while True:

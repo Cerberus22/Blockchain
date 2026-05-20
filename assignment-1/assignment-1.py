@@ -114,7 +114,7 @@ async def start_client() -> None:
     RESULT_FUTURE = Future()
 
     builder = ConfigBuilder().clear_keys().clear_overlays()
-    builder.add_key("client", "curve25519", "client.pem")
+    builder.add_key("client", "curve25519", "../yurian.pem")
     builder.add_overlay(
         "DelftCommunity",
         "client",

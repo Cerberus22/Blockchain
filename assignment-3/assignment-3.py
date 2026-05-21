@@ -125,7 +125,7 @@ def mine_block(candidate: Block) -> Block:
         time.sleep(0)
 
 
-class BlockchainCommunity(Community, PeerObserver):
+class BlockchainCommunity(Community):
     community_id = CHAIN_COMMUNITY_ID
 
     def __init__(self, settings: CommunitySettings) -> None:
@@ -777,6 +777,8 @@ async def start_client() -> None:
                 await blockchain_community.speed_mine()
             case 11:
                 print(do_mine)
+            case 12:
+                blockchain_community._mine_one_block(asyncio.get_event_loop())
             case _:
                 exit(0)
         await sleep(0.1)

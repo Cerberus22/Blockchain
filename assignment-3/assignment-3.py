@@ -423,15 +423,12 @@ class BlockchainCommunity(Community):
     async def _broadcast_block(self, mined_block: Block) -> None:
         """Called on the event-loop thread to broadcast a freshly mined block."""
         peers = self.get_peers()
-        print(f"[ANNOUNCE] Sending block {len(blockchain) - 1} to {len(peers)} peers")
         message = BlockAnnouncementMessage(
             height=len(blockchain) - 1,
             block=mined_block.to_bytes(),
         )
-        for i, peer in enumerate(peers):
-            print(f"  [ANNOUNCE] Sending to peer {i+1}/{len(peers)}: {peer}")
+        for peer in peers:
             self.ez_send(peer, message)
-        print(f"[ANNOUNCE] Sent block {len(blockchain) - 1} to all peers")
 
     def _mining_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         global difficulty

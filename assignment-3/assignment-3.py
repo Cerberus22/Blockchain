@@ -173,6 +173,7 @@ class BlockchainCommunity(Community):
 
     @lazy_wrapper(GetBlockRequest)
     def on_get_block_request(self, peer: Peer, payload: GetBlockRequest) -> None:
+        print(f"Returning block {payload.height}")
         if payload.height < 0 or payload.height >= len(blockchain):
             return
 
@@ -292,9 +293,24 @@ class BlockchainCommunity(Community):
             print(f"{peer} has longer chain of {payload.height}")
             global do_mine
             do_mine = False
-            message = EntireChainRequest(request_id=0, height=0)
+
+            peerkey = peer.public_key.key_to_bin().hex()
+
+            # If we're already catching up from this peer, don't restart the fetch
+            if peerkey in new_chain:
+                print(f"Already catching up from {peer}; ignoring new announcement for {payload.height}")
+                return
+
+            new_chain[peerkey] = {
+                "remote_tip_height": payload.height,
+                "blocks": [],  # collected in reverse order (tip first)
+                "common_ancestor_found": False,
+            }
+
+            # request the tip first and then work backwards
+            message = EntireChainRequest(request_id=0, height=payload.height)
             self.ez_send(peer, message)
-            print(f"Requested entire chain from {peer}")
+            print(f"Requested block {payload.height} from {peer} (working backwards)")
             return
 
         block = Block.from_bytes(payload.block)
@@ -337,48 +353,68 @@ class BlockchainCommunity(Community):
         self, peer: Peer, payload: EntireChainResponse
     ) -> None:
         global blockchain, do_mine
+
         if payload.total_height == 0:
             do_mine = True
             return
 
         peerkey = peer.public_key.key_to_bin().hex()
 
-        if peerkey not in new_chain.keys():
-            new_chain[peerkey] = []
+        if peerkey not in new_chain:
+            return
+
         try:
             block = Block.from_bytes(payload.block)
             block.height = payload.height
-            new_chain[peerkey].append(block)
-            print(
-                f"[CHAIN_RESP] Accumulated {len(new_chain[peerkey])}/{payload.total_height + 1} blocks from {peer}"
-            )
+            new_chain[peerkey]["blocks"].append(block)
         except Exception as e:
-            print(f"[CHAIN_RESP] ERROR deserializing block {payload.height}: {e}")
+            print(f"ERROR deserializing block {payload.height}: {e}")
             import traceback
 
             traceback.print_exc()
+            new_chain.pop(peerkey, None)
             return
 
-        if len(new_chain[peerkey]) < payload.total_height + 1:
+        # If this block's height exists in our local chain, check for common ancestor
+        if payload.height < len(blockchain):
+            if block.hash() == blockchain[payload.height].hash():
+                # found common ancestor at payload.height
+                all_rev = list(reversed(new_chain[peerkey]["blocks"]))
+                # Exclude the ancestor block itself (height == payload.height)
+                fetched_blocks = [b for b in all_rev if b.height > payload.height]
+
+                # Assign correct heights to fetched blocks (ancestor+1 .. tip)
+                for i, b in enumerate(fetched_blocks):
+                    b.height = payload.height + 1 + i
+
+                # Build candidate chain: our chain up to ancestor + fetched blocks
+                candidate_chain = blockchain[: payload.height + 1] + fetched_blocks
+                chain_correct = self.validate_chain(candidate_chain)
+                if chain_correct and len(candidate_chain) > len(blockchain):
+                    blockchain = candidate_chain
+                    print(
+                        f"Replaced local chain with new chain from {peer} of length {len(blockchain) - 1}"
+                    )
+                    for i in range(len(blockchain)):
+                        blockchain[i].height = i
+                    do_mine = True
+                else:
+                    print(
+                        f"Rejected new chain from {peer} (valid: {chain_correct}, longer: {len(candidate_chain) > len(blockchain)})"
+                    )
+                new_chain.pop(peerkey, None)
+                return
+
+        # Not yet found ancestor; request previous block (height-1) if possible
+        if payload.height > 0:
             message = EntireChainRequest(
-                request_id=payload.request_id + 1, height=payload.height + 1
+                request_id=payload.request_id + 1, height=payload.height - 1
             )
             self.ez_send(peer, message)
         else:
-            chain_correct = self.validate_chain(new_chain[peerkey])
-            if chain_correct and len(new_chain[peerkey]) > len(blockchain):
-                blockchain = new_chain[peerkey]
-                print(
-                    f"Replaced local chain with new chain from {peer} of length {len(blockchain) - 1}"
-                )
-                for i in range(len(blockchain)):
-                    blockchain[i].height = i
-                do_mine = True
-            else:
-                print(
-                    f"Rejected new chain from {peer} of length {len(new_chain[peerkey]) - 1} (valid: {chain_correct}, longer: {len(new_chain[peerkey]) > len(blockchain)})"
-                )
-            new_chain.pop(peerkey)
+            # Reached genesis without finding common ancestor; drop fetch
+            print(f"Reached block 0 without finding common ancestor with {peer}")
+            new_chain.pop(peerkey, None)
 
     async def mine_blocks(self, idle=True) -> None:
         global difficulty
@@ -415,17 +451,12 @@ class BlockchainCommunity(Community):
             )
 
             peers = self.get_peers()
-            print(
-                f"[ANNOUNCE] Sending block {len(blockchain) - 1} to {len(peers)} peers"
-            )
             message = BlockAnnouncementMessage(
                 height=len(blockchain) - 1,
                 block=mined_block.to_bytes(),
             )
-            for i, peer in enumerate(peers):
-                print(f"  [ANNOUNCE] Sending to peer {i+1}/{len(peers)}: {peer}")
+            for peer in peers:
                 self.ez_send(peer, message)
-            print(f"[ANNOUNCE] Sent block {len(blockchain) - 1} to all peers")
 
             await sleep(0)
 

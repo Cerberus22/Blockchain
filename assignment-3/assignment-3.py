@@ -3,6 +3,8 @@ import time
 import hashlib
 import argparse
 import random
+import threading
+import asyncio
 from messages import *
 from ipv8.peer import Peer
 from custom_types import *
@@ -298,7 +300,9 @@ class BlockchainCommunity(Community):
 
             # If we're already catching up from this peer, don't restart the fetch
             if peerkey in new_chain:
-                print(f"Already catching up from {peer}; ignoring new announcement for {payload.height}")
+                print(
+                    f"Already catching up from {peer}; ignoring new announcement for {payload.height}"
+                )
                 return
 
             new_chain[peerkey] = {
@@ -414,13 +418,26 @@ class BlockchainCommunity(Community):
         else:
             # Reached genesis without finding common ancestor; drop fetch
             print(f"Reached block 0 without finding common ancestor with {peer}")
-            new_chain.pop(peerkey, None)
+            new_chain.pop(peerkey)
 
-    async def mine_blocks(self, idle=True) -> None:
+    async def _broadcast_block(self, mined_block: Block) -> None:
+        """Called on the event-loop thread to broadcast a freshly mined block."""
+        peers = self.get_peers()
+        print(f"[ANNOUNCE] Sending block {len(blockchain) - 1} to {len(peers)} peers")
+        message = BlockAnnouncementMessage(
+            height=len(blockchain) - 1,
+            block=mined_block.to_bytes(),
+        )
+        for i, peer in enumerate(peers):
+            print(f"  [ANNOUNCE] Sending to peer {i+1}/{len(peers)}: {peer}")
+            self.ez_send(peer, message)
+        print(f"[ANNOUNCE] Sent block {len(blockchain) - 1} to all peers")
+
+    def _mining_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         global difficulty
         while True:
             if not do_mine:
-                await sleep(0.1)
+                time.sleep(0.1)
                 continue
             tip = blockchain[-1]
             txs = sorted(mempool, key=lambda tx: tx.hash())
@@ -436,10 +453,9 @@ class BlockchainCommunity(Community):
             candidate.nonce = 0
             candidate.height = tip.height + 1
 
-            mined_block = await to_thread(mine_block, candidate)
+            mined_block = mine_block(candidate)
 
             if blockchain[-1].hash() != tip.hash():
-                await sleep(0)
                 continue
 
             blockchain.append(mined_block)
@@ -450,18 +466,8 @@ class BlockchainCommunity(Community):
                 f"Mined block {len(blockchain) - 1} with {len(txs)} txs and difficulty {mined_block.difficulty}"
             )
 
-            peers = self.get_peers()
-            message = BlockAnnouncementMessage(
-                height=len(blockchain) - 1,
-                block=mined_block.to_bytes(),
-            )
-            for peer in peers:
-                self.ez_send(peer, message)
-
-            await sleep(0)
-
-            if not idle:
-                return
+            # Schedule broadcast safely back onto the asyncio event loop
+            asyncio.run_coroutine_threadsafe(self._broadcast_block(mined_block), loop)
 
     def validate_chain(self, chain=blockchain) -> bool:
         for i in range(1, len(chain)):
@@ -476,8 +482,8 @@ class BlockchainCommunity(Community):
         global difficulty
         old_difficulty = difficulty
         difficulty = 2
-        for i in range(10):
-            await self.mine_blocks(idle=False)
+        loop = asyncio.get_event_loop()
+        await to_thread(lambda: [self._mining_loop_once(loop) for _ in range(10)])
         difficulty = old_difficulty
 
     async def mine_ahead(self) -> None:
@@ -492,11 +498,39 @@ class BlockchainCommunity(Community):
         mempool.add(t)
         old_difficulty = difficulty
         difficulty = 4
-        await self.mine_blocks(idle=False)
+        loop = asyncio.get_event_loop()
+        await to_thread(self._mine_one_block, loop)
         t.timestamp += 1
         mempool.add(t)
-        await self.mine_blocks(idle=False)
+        await to_thread(self._mine_one_block, loop)
         difficulty = old_difficulty
+
+    def _mine_one_block(self, loop: asyncio.AbstractEventLoop) -> None:
+        global difficulty
+        tip = blockchain[-1]
+        txs = sorted(mempool, key=lambda tx: tx.hash())
+        candidate = Block()
+        candidate.prev_hash = tip.hash()
+        candidate.txs = [Transaction.from_bytes(tx.to_bytes())[0] for tx in txs]
+        candidate._compute_txs_hash()
+        candidate.timestamp = max(
+            tip.timestamp + 1,
+            max((tx.timestamp for tx in txs), default=tip.timestamp + 1),
+        )
+        candidate.difficulty = difficulty
+        candidate.nonce = 0
+        candidate.height = tip.height + 1
+
+        mined_block = mine_block(candidate)
+
+        if blockchain[-1].hash() != tip.hash():
+            return
+
+        blockchain.append(mined_block)
+        for tx in txs:
+            mempool.discard(tx)
+
+        asyncio.run_coroutine_threadsafe(self._broadcast_block(mined_block), loop)
 
     async def change_difficulty(self) -> None:
         global difficulty
@@ -554,7 +588,9 @@ class BlockchainCommunity(Community):
             )
 
     def start_mining(self) -> None:
-        create_task(self.mine_blocks())
+        loop = asyncio.get_event_loop()
+        t = threading.Thread(target=self._mining_loop, args=(loop,), daemon=True)
+        t.start()
 
     # Starting function
     async def started(self) -> None:

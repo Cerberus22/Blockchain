@@ -440,7 +440,6 @@ class BlockchainCommunity(Community):
 
     async def _broadcast_block(self, mined_block: Block) -> None:
         """Called on the event-loop thread to broadcast a freshly mined block."""
-        print(f"announcing block {mined_block.height}")
         peers = self.get_peers()
         message = BlockAnnouncementMessage(
             height=len(blockchain) - 1,

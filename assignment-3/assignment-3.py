@@ -11,8 +11,9 @@ from custom_types import *
 from ipv8_service import IPv8
 from dataclasses import dataclass
 from ipv8.util import run_forever
-from asyncio import run, to_thread, sleep, create_task
 from ipv8.lazy_community import lazy_wrapper
+from ipv8.peerdiscovery.network import PeerObserver
+from asyncio import run, to_thread, sleep, create_task
 from ipv8.community import Community, CommunitySettings
 from ipv8.messaging.payload_dataclass import DataClassPayload, type_from_format
 from ipv8.configuration import (
@@ -61,7 +62,7 @@ team_peers = [None, None, None]
 team_keys = [AISTE_PUBLIC_KEY, AYKUT_PUBLIC_KEY, YURIAN_PUBLIC_KEY]
 group_id = bytes.fromhex("4687205acec0b3c4")
 mempool = set()
-difficulty = 22  # in bits
+difficulty = 20  # in bits
 do_mine = True
 new_chain = {}
 FETCH_TIMEOUT = 10  # seconds before a fetch is considered stale
@@ -124,7 +125,7 @@ def mine_block(candidate: Block) -> Block:
         time.sleep(0)
 
 
-class BlockchainCommunity(Community):
+class BlockchainCommunity(Community, PeerObserver):
     community_id = CHAIN_COMMUNITY_ID
 
     def __init__(self, settings: CommunitySettings) -> None:
@@ -181,7 +182,7 @@ class BlockchainCommunity(Community):
             return
 
         block = blockchain[payload.height]
-        self.ez_send(
+        self._safe_ez_send(
             peer,
             GetBlockResponse(
                 height=payload.height,
@@ -211,7 +212,7 @@ class BlockchainCommunity(Community):
         self, peer: Peer, payload: GetChainHeigthRequest
     ) -> None:
         tip = blockchain[-1]
-        self.ez_send(
+        self._safe_ez_send(
             peer,
             GetChainHeigthResponse(
                 request_id=payload.request_id,
@@ -265,7 +266,7 @@ class BlockchainCommunity(Community):
             tx_hash=t.hash(),
             message=message,
         )
-        self.ez_send(peer, message)
+        self._safe_ez_send(peer, message)
 
     @lazy_wrapper(ChangedDifficultyMessage)
     def on_changed_difficulty(
@@ -279,6 +280,7 @@ class BlockchainCommunity(Community):
     async def on_block_announcement(
         self, peer: Peer, payload: BlockAnnouncementMessage
     ) -> None:
+        global do_mine
         # If blockchain is short, inform other node we have a longer chain
         if payload.height < len(blockchain) - 1:
             print(
@@ -288,7 +290,7 @@ class BlockchainCommunity(Community):
                 height=len(blockchain) - 1,
                 block=blockchain[-1].to_bytes(),
             )
-            self.ez_send(peer, message)
+            self._safe_ez_send(peer, message)
             return
 
         # If blockchain is long, request missing blocks
@@ -316,10 +318,11 @@ class BlockchainCommunity(Community):
                 "common_ancestor_found": False,
                 "ts": time.time(),
             }
+            do_mine = False
 
             # request the tip first and then work backwards
             message = EntireChainRequest(request_id=0, height=payload.height)
-            self.ez_send(peer, message)
+            self._safe_ez_send(peer, message)
             print(f"Requested block {payload.height} from {peer} (working backwards)")
             return
 
@@ -357,7 +360,7 @@ class BlockchainCommunity(Community):
             height=payload.height,
             block=blockchain[payload.height].to_bytes(),
         )
-        self.ez_send(peer, message)
+        self._safe_ez_send(peer, message)
 
     @lazy_wrapper(EntireChainResponse)
     def on_entire_chain_response(
@@ -384,6 +387,7 @@ class BlockchainCommunity(Community):
             import traceback
 
             traceback.print_exc()
+            do_mine = True
             new_chain.pop(peerkey, None)
             return
 
@@ -409,11 +413,11 @@ class BlockchainCommunity(Community):
                     )
                     for i in range(len(blockchain)):
                         blockchain[i].height = i
-                    do_mine = True
                 else:
                     print(
                         f"Rejected new chain from {peer} (valid: {chain_correct}, longer: {len(candidate_chain) > len(blockchain)})"
                     )
+                do_mine = True
                 new_chain.pop(peerkey, None)
                 return
 
@@ -422,7 +426,7 @@ class BlockchainCommunity(Community):
             message = EntireChainRequest(
                 request_id=payload.request_id + 1, height=payload.height - 1
             )
-            self.ez_send(peer, message)
+            self._safe_ez_send(peer, message)
         else:
             # Reached genesis without finding common ancestor; drop fetch
             print(f"Reached block 0 without finding common ancestor with {peer}")

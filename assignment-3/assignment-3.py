@@ -61,9 +61,10 @@ team_peers = [None, None, None]
 team_keys = [AISTE_PUBLIC_KEY, AYKUT_PUBLIC_KEY, YURIAN_PUBLIC_KEY]
 group_id = bytes.fromhex("4687205acec0b3c4")
 mempool = set()
-difficulty = 20  # in bits
+difficulty = 22  # in bits
 do_mine = True
 new_chain = {}
+FETCH_TIMEOUT = 10  # seconds before a fetch is considered stale
 
 genesis_block = Block().genesis()
 blockchain = [genesis_block]
@@ -293,22 +294,27 @@ class BlockchainCommunity(Community):
         # If blockchain is long, request missing blocks
         if payload.height > len(blockchain):
             print(f"{peer} has longer chain of {payload.height}")
-            global do_mine
-            do_mine = False
-
             peerkey = peer.public_key.key_to_bin().hex()
 
-            # If we're already catching up from this peer, don't restart the fetch
+            # If we're already catching up from this peer, check for staleness
             if peerkey in new_chain:
-                print(
-                    f"Already catching up from {peer}; ignoring new announcement for {payload.height}"
-                )
-                return
+                age = time.time() - new_chain[peerkey].get("ts", 0)
+                if age < FETCH_TIMEOUT:
+                    print(
+                        f"Already catching up from {peer}; ignoring new announcement for {payload.height}"
+                    )
+                    return
+                else:
+                    print(
+                        f"Fetch from {peer} stale (age={int(age)}s); restarting catch-up"
+                    )
+                    new_chain.pop(peerkey)
 
             new_chain[peerkey] = {
                 "remote_tip_height": payload.height,
                 "blocks": [],  # collected in reverse order (tip first)
                 "common_ancestor_found": False,
+                "ts": time.time(),
             }
 
             # request the tip first and then work backwards
@@ -335,6 +341,7 @@ class BlockchainCommunity(Community):
 
     @lazy_wrapper(EntireChainRequest)
     def on_entire_chain_request(self, peer: Peer, payload: EntireChainRequest) -> None:
+        print(f"Request received for height {payload.height}")
         if payload.height < 0 or payload.height >= len(blockchain):
             message = EntireChainResponse(
                 request_id=payload.request_id,
@@ -371,6 +378,7 @@ class BlockchainCommunity(Community):
             block = Block.from_bytes(payload.block)
             block.height = payload.height
             new_chain[peerkey]["blocks"].append(block)
+            new_chain[peerkey]["ts"] = time.time()
         except Exception as e:
             print(f"ERROR deserializing block {payload.height}: {e}")
             import traceback
@@ -420,15 +428,22 @@ class BlockchainCommunity(Community):
             print(f"Reached block 0 without finding common ancestor with {peer}")
             new_chain.pop(peerkey)
 
+    def _safe_ez_send(self, peer: Peer, message) -> None:
+        try:
+            self.ez_send(peer, message)
+        except Exception as e:
+            print(f"Send to {peer} failed: {e}")
+
     async def _broadcast_block(self, mined_block: Block) -> None:
         """Called on the event-loop thread to broadcast a freshly mined block."""
+        print(f"announcing block {mined_block.height}")
         peers = self.get_peers()
         message = BlockAnnouncementMessage(
             height=len(blockchain) - 1,
             block=mined_block.to_bytes(),
         )
         for peer in peers:
-            self.ez_send(peer, message)
+            self._safe_ez_send(peer, message)
 
     def _mining_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         global difficulty
@@ -480,7 +495,7 @@ class BlockchainCommunity(Community):
         old_difficulty = difficulty
         difficulty = 2
         loop = asyncio.get_event_loop()
-        await to_thread(lambda: [self._mining_loop_once(loop) for _ in range(10)])
+        await to_thread(lambda: [self._mine_one_block(loop) for _ in range(10)])
         difficulty = old_difficulty
 
     async def mine_ahead(self) -> None:
@@ -534,7 +549,9 @@ class BlockchainCommunity(Community):
         difficulty = int(await async_input("New difficulty: "))
         print(f"Difficulty set to {difficulty}")
         for peer in self.get_peers():
-            self.ez_send(peer, ChangedDifficultyMessage(new_difficulty=difficulty))
+            self._safe_ez_send(
+                peer, ChangedDifficultyMessage(new_difficulty=difficulty)
+            )
 
     async def submit_transaction(self) -> None:
         t = Transaction()
@@ -551,7 +568,7 @@ class BlockchainCommunity(Community):
             signature=t.signature,
         )
         for peer in self.get_peers():
-            self.ez_send(peer, message)
+            self._safe_ez_send(peer, message)
         mempool.add(t)
 
     async def find_peers(self) -> None:

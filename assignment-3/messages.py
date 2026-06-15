@@ -84,3 +84,17 @@ class EntireChainResponse(DataClassPayload[10]):
     total_height: int
     height: int
     block: bytes
+
+
+# Force serializer format registration for all payload types
+_ = RegisterBlockchainResponse(False, "")
+_ = SubmitTransactionRequest(b"", b"", 0, b"")
+_ = SubmitTransactionResponse(False, b"", "")
+_ = GetChainHeigthRequest(0)
+_ = GetBlockRequest(0)
+_ = GetChainHeigthResponse(0, 0, b"")
+_ = GetBlockResponse(0, b"", b"", 0, 0, 0, b"", b"")
+_ = ChangedDifficultyMessage(0)
+_ = BlockAnnouncementMessage(0, b"")
+_ = EntireChainRequest(0, 0)
+_ = EntireChainResponse(0, 0, 0, b"")

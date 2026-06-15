@@ -2,7 +2,6 @@ import time
 from hashlib import sha256
 from ipv8.keyvault.crypto import ECCrypto
 
-
 class Transaction:
     sender_key: bytes
     data: bytes
@@ -32,11 +31,12 @@ class Transaction:
     def verify_signature(self) -> bool:
         key = ECCrypto().key_from_public_bin(self.sender_key)
         try:
-            key.verify(
+            success = key.verify(
                 self.signature,
                 self.sender_key + self.data + self.timestamp.to_bytes(8, "big"),
             )
-            return True
+            if success is None: return True
+            return success
         except ValueError:
             return False
         return False
@@ -106,7 +106,6 @@ class Transaction:
 
     def __hash__(self) -> int:
         return hash(self.signature)
-
 
 class Block:
     prev_hash: bytes

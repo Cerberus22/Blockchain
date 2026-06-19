@@ -33,12 +33,12 @@ class SubmitTransactionResponse(DataClassPayload[2]):
 
 
 @dataclass
-class GetChainHeigthRequest(DataClassPayload[3]):
+class GetChainHeightRequest(DataClassPayload[3]):
     request_id: int
 
 
 @dataclass
-class GetChainHeigthResponse(DataClassPayload[4]):
+class GetChainHeightResponse(DataClassPayload[4]):
     request_id: int
     height: int
     tip_hash: bytes
@@ -90,9 +90,9 @@ class EntireChainResponse(DataClassPayload[10]):
 _ = RegisterBlockchainResponse(False, "")
 _ = SubmitTransactionRequest(b"", b"", 0, b"")
 _ = SubmitTransactionResponse(False, b"", "")
-_ = GetChainHeigthRequest(0)
+_ = GetChainHeightRequest(0)
 _ = GetBlockRequest(0)
-_ = GetChainHeigthResponse(0, 0, b"")
+_ = GetChainHeightResponse(0, 0, b"")
 _ = GetBlockResponse(0, b"", b"", 0, 0, 0, b"", b"")
 _ = ChangedDifficultyMessage(0)
 _ = BlockAnnouncementMessage(0, b"")

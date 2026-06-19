@@ -8,14 +8,14 @@ Once you register, the Lab 3 server joins your blockchain community, submits a t
 
 ## Server
 
-| Parameter                 | Value                                                                                                                                                                       |
-| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Registration Community ID | `4c616233426c6f636b636861696e323032365057` (= ASCII `Lab3Blockchain2026PW`, 20 bytes / 40 hex)                                                                              |
-| Server public key         | `4c69624e61434c504b3ae3fc099fb56ca3b5e1de9a1c843387f2acdbb78b1bd4350ffde518068a0d246344b10d0d8c355fd0d76873e7d7f7838f3715e025af08f791324495e083331ce6` (74 bytes / 148 hex) |
-| Group size                | 3 (same composition as Lab 2)                                                                                                                                               |
-| Required confirmations    | 3                                                                                                                                                                           |
-| Per-attempt timeout       | 5 minutes                                                                                                                                                                   |
-| Deadline                  | `2026-06-12T23:59:59 UTC`                                                                                                                                                   |
+| Parameter | Value |
+|---|---|
+| Registration Community ID | `4c616233426c6f636b636861696e323032365057` (= ASCII `Lab3Blockchain2026PW`, 20 bytes / 40 hex) |
+| Server public key | `4c69624e61434c504b3ae3fc099fb56ca3b5e1de9a1c843387f2acdbb78b1bd4350ffde518068a0d246344b10d0d8c355fd0d76873e7d7f7838f3715e025af08f791324495e083331ce6` (74 bytes / 148 hex) |
+| Group size | 3 (same composition as Lab 2) |
+| Required confirmations | 3 |
+| Per-attempt timeout | 5 minutes |
+| Deadline | `2026-06-12T23:59:59 UTC` |
 
 Reach the server through IPv8 peer discovery on the registration community ID above. Filter peers by the published public key — never trust a peer whose key does not match.
 
@@ -37,17 +37,17 @@ Before grading, register your blockchain's community ID with the Lab 3 server on
 
 Sent by any group member.
 
-| Field          | Type  | Wire          | Description                             |
-| -------------- | ----- | ------------- | --------------------------------------- |
-| `group_id`     | str   | `varlenHutf8` | Your group ID from Lab 2                |
-| `community_id` | bytes | `varlenH`     | 20-byte community ID of your blockchain |
+| Field | Type | Wire | Description |
+|---|---|---|---|
+| `group_id` | str | `varlenHutf8` | Your group ID from Lab 2 |
+| `community_id` | bytes | `varlenH` | 20-byte community ID of your blockchain |
 
 ### Register Response (message_id = 2)
 
-| Field     | Type | Wire          | Description           |
-| --------- | ---- | ------------- | --------------------- |
-| `success` | bool | `?`           | True if registered    |
-| `message` | str  | `varlenHutf8` | Human-readable result |
+| Field | Type | Wire | Description |
+|---|---|---|---|
+| `success` | bool | `?` | True if registered |
+| `message` | str | `varlenHutf8` | Human-readable result |
 
 Once your registration is recorded, the server joins your blockchain community and runs a check within a few minutes. If your 3 nodes aren't fully online yet when the first attempt fires, the server retries automatically — **up to 3 retries per registration**. After that, automatic retries stop until you register again.
 
@@ -59,55 +59,55 @@ Inside **your** blockchain community (the one identified by the `community_id` y
 
 ### Submit Transaction (message_id = 1)
 
-| Field        | Type  | Wire      | Description                                             |
-| ------------ | ----- | --------- | ------------------------------------------------------- |
-| `sender_key` | bytes | `varlenH` | IPv8 public key of the signer                           |
-| `data`       | bytes | `varlenH` | Arbitrary payload bytes                                 |
-| `timestamp`  | int   | `q`       | Unix timestamp                                          |
-| `signature`  | bytes | `varlenH` | Signature over `sender_key + data + timestamp_8byte_be` |
+| Field | Type | Wire | Description |
+|---|---|---|---|
+| `sender_key` | bytes | `varlenH` | IPv8 public key of the signer |
+| `data` | bytes | `varlenH` | Arbitrary payload bytes |
+| `timestamp` | int | `q` | Unix timestamp |
+| `signature` | bytes | `varlenH` | Signature over `sender_key + data + timestamp_8byte_be` |
 
 Verify the signature, add the transaction to your mempool, and respond.
 
 ### Submit Transaction Response (message_id = 2)
 
-| Field     | Type  | Wire          | Description                                                |
-| --------- | ----- | ------------- | ---------------------------------------------------------- |
-| `success` | bool  | `?`           | True if accepted into your mempool                         |
-| `tx_hash` | bytes | `varlenH`     | 32-byte transaction hash (formula in _Block format_ below) |
-| `message` | str   | `varlenHutf8` | Human-readable result                                      |
+| Field | Type | Wire | Description |
+|---|---|---|---|
+| `success` | bool | `?` | True if accepted into your mempool |
+| `tx_hash` | bytes | `varlenH` | 32-byte transaction hash (formula in *Block format* below) |
+| `message` | str | `varlenHutf8` | Human-readable result |
 
 ### Get Chain Height (message_id = 3)
 
-| Field        | Type | Wire | Description                          |
-| ------------ | ---- | ---- | ------------------------------------ |
-| `request_id` | int  | `q`  | Identifier for matching the response |
+| Field | Type | Wire | Description |
+|---|---|---|---|
+| `request_id` | int | `q` | Identifier for matching the response |
 
 ### Chain Height Response (message_id = 4)
 
-| Field        | Type  | Wire      | Description                        |
-| ------------ | ----- | --------- | ---------------------------------- |
-| `request_id` | int   | `q`       | Matching request identifier        |
-| `height`     | int   | `q`       | Current chain height (genesis = 0) |
-| `tip_hash`   | bytes | `varlenH` | Hash of the latest block header    |
+| Field | Type | Wire | Description |
+|---|---|---|---|
+| `request_id` | int | `q` | Matching request identifier |
+| `height` | int | `q` | Current chain height (genesis = 0) |
+| `tip_hash` | bytes | `varlenH` | Hash of the latest block header |
 
 ### Get Block (message_id = 5)
 
-| Field    | Type | Wire | Description           |
-| -------- | ---- | ---- | --------------------- |
-| `height` | int  | `q`  | Block height to fetch |
+| Field | Type | Wire | Description |
+|---|---|---|---|
+| `height` | int | `q` | Block height to fetch |
 
 ### Block Response (message_id = 6)
 
-| Field        | Type  | Wire      | Description                                                                        |
-| ------------ | ----- | --------- | ---------------------------------------------------------------------------------- |
-| `height`     | int   | `q`       | Block height                                                                       |
-| `prev_hash`  | bytes | `varlenH` | Previous block hash (32 bytes)                                                     |
-| `txs_hash`   | bytes | `varlenH` | Commitment to the block's transactions (32 bytes)                                  |
-| `timestamp`  | int   | `q`       | Block timestamp                                                                    |
-| `difficulty` | int   | `q`       | Declared difficulty in leading zero bits                                           |
-| `nonce`      | int   | `q`       | PoW nonce                                                                          |
-| `block_hash` | bytes | `varlenH` | Hash of this block header (32 bytes)                                               |
-| `tx_hashes`  | bytes | `varlenH` | Concatenated 32-byte transaction hashes, in block order. `b""` for an empty block. |
+| Field | Type | Wire | Description |
+|---|---|---|---|
+| `height` | int | `q` | Block height |
+| `prev_hash` | bytes | `varlenH` | Previous block hash (32 bytes) |
+| `txs_hash` | bytes | `varlenH` | Commitment to the block's transactions (32 bytes) |
+| `timestamp` | int | `q` | Block timestamp |
+| `difficulty` | int | `q` | Declared difficulty in leading zero bits |
+| `nonce` | int | `q` | PoW nonce |
+| `block_hash` | bytes | `varlenH` | Hash of this block header (32 bytes) |
+| `tx_hashes` | bytes | `varlenH` | Concatenated 32-byte transaction hashes, in block order. `b""` for an empty block. |
 
 ## Block format
 

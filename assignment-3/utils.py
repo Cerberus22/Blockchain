@@ -76,5 +76,3 @@ def mine_block(candidate: Block) -> Block:
             return candidate
         nonce = random.randint(0, 2**32 - 1)
         time.sleep(0)
-
-        time.sleep(0)

@@ -8,8 +8,8 @@ from messages import (
     SubmitTransactionResponse,
     GetBlockRequest,
     GetBlockResponse,
-    GetChainHeigthRequest,
-    GetChainHeigthResponse,
+    GetChainHeightRequest,
+    GetChainHeightResponse,
     BlockAnnouncementMessage,
     ChangedDifficultyMessage,
     EntireChainRequest,
@@ -39,10 +39,10 @@ class BlockchainCommunity(Community):
         self.add_message_handler(SubmitTransactionRequest, self.on_submit_transaction_request)
         self.add_message_handler(SubmitTransactionResponse, self.on_submit_transaction_response)
         self.add_message_handler(GetBlockResponse, self.on_get_block_response)
-        self.add_message_handler(GetChainHeigthResponse, self.on_get_chain_height_response)
+        self.add_message_handler(GetChainHeightResponse, self.on_get_chain_height_response)
         self.add_message_handler(BlockAnnouncementMessage, self.on_block_announcement)
         self.add_message_handler(ChangedDifficultyMessage, self.on_changed_difficulty)
-        self.add_message_handler(GetChainHeigthRequest, self.on_get_chain_height_request)
+        self.add_message_handler(GetChainHeightRequest, self.on_get_chain_height_request)
         self.add_message_handler(GetBlockRequest, self.on_get_block_request)
         self.add_message_handler(EntireChainRequest, self.on_entire_chain_request)
         self.add_message_handler(EntireChainResponse, self.on_entire_chain_response)
@@ -92,8 +92,8 @@ class BlockchainCommunity(Community):
             ),
         )
 
-    @lazy_wrapper(GetChainHeigthResponse)
-    def on_get_chain_height_response(self, peer: Peer, payload: GetChainHeigthResponse) -> None:
+    @lazy_wrapper(GetChainHeightResponse)
+    def on_get_chain_height_response(self, peer: Peer, payload: GetChainHeightResponse) -> None:
         print(
             f"Get Chain Height Response from {peer}:"
             f"\n\trequest_id={payload.request_id}"
@@ -101,12 +101,12 @@ class BlockchainCommunity(Community):
             f"\n\ttip_hash={payload.tip_hash.hex()}"
         )
 
-    @lazy_wrapper(GetChainHeigthRequest)
-    def on_get_chain_height_request(self, peer: Peer, payload: GetChainHeigthRequest) -> None:
+    @lazy_wrapper(GetChainHeightRequest)
+    def on_get_chain_height_request(self, peer: Peer, payload: GetChainHeightRequest) -> None:
         tip = state.blockchain[-1]
         self._safe_ez_send(
             peer,
-            GetChainHeigthResponse(
+            GetChainHeightResponse(
                 request_id=payload.request_id,
                 height=len(state.blockchain) - 1,
                 tip_hash=tip.hash(),
@@ -402,6 +402,7 @@ class BlockchainCommunity(Community):
         state.difficulty = 4
         loop = asyncio.get_event_loop()
         await to_thread(self._mine_one_block, loop)
+        t = Transaction.from_bytes(t.to_bytes())[0]
         t.timestamp += 1
         state.mempool.add(t)
         await to_thread(self._mine_one_block, loop)

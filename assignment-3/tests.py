@@ -1,6 +1,10 @@
 from hashlib import sha256
 from custom_types import Block, Transaction
-from utils import validate_block, mine_block, leading_zero_bits
+from utils import (
+    validate_block, mine_block, leading_zero_bits,
+    validate_timestamp, calculate_next_difficulty, get_median_time_past,
+    ADJUSTMENT_INTERVAL, TARGET_BLOCK_TIME, MAX_ADJUSTMENT_FACTOR, MAX_FUTURE_DRIFT,
+)
 from ipv8.keyvault.crypto import ECCrypto
 
 
@@ -298,3 +302,138 @@ def test_broken_chain_link_fails():
     block2 = mine_block(block2)
 
     assert validate_block(block2, block1.hash()) is False
+
+
+# helpertje for adaptive-difficulty tests
+
+def _make_fake_chain(timestamps: list, difficulty: int = 20) -> list:
+    """Build a list of Block objects with given timestamps (index 0 = genesis).
+    Blocks are NOT proof-of-work valid — only structure and timestamps matter
+    for the adaptive-difficulty tests."""
+    chain = []
+    prev_hash = b"\x00" * 32
+    for i, ts in enumerate(timestamps):
+        b = Block()
+        b.height = i
+        b.timestamp = ts
+        b.difficulty = difficulty
+        b.prev_hash = prev_hash
+        b.txs = []
+        b._compute_txs_hash()
+        b.nonce = 0
+        chain.append(b)
+        prev_hash = b.hash()
+    return chain
+
+
+# Median Time Past
+
+def test_mtp_returns_median_of_full_window():
+    # 12 blocks, tip at index 11; MTP_WINDOW=11 -> indices 1..11
+    # timestamps 1..11 sorted -> median at index 5 = 6
+    chain = _make_fake_chain(list(range(12)))
+    assert get_median_time_past(chain, 11) == 6
+
+
+def test_mtp_short_chain_uses_all_available_blocks():
+    # Only 3 blocks; all three are used
+    chain = _make_fake_chain([0, 5, 10])
+    # sorted [0, 5, 10], median index 1 = 5
+    assert get_median_time_past(chain, 2) == 5
+
+
+def test_mtp_single_block():
+    chain = _make_fake_chain([42])
+    assert get_median_time_past(chain, 0) == 42
+
+
+# validate_timestamp
+
+def test_validate_timestamp_accepts_value_above_mtp():
+    # MTP of [0,10,20,30,40,50,60,70,80,90,100] = median of all 11 = 50
+    chain = _make_fake_chain(list(range(0, 110, 10)))
+    mtp = get_median_time_past(chain, len(chain) - 1)
+    assert validate_timestamp(mtp + 1, chain, check_future=False) is True
+
+
+def test_validate_timestamp_rejects_value_equal_to_mtp():
+    chain = _make_fake_chain(list(range(0, 110, 10)))
+    mtp = get_median_time_past(chain, len(chain) - 1)
+    assert validate_timestamp(mtp, chain, check_future=False) is False
+
+
+def test_validate_timestamp_rejects_value_below_mtp():
+    chain = _make_fake_chain(list(range(0, 110, 10)))
+    mtp = get_median_time_past(chain, len(chain) - 1)
+    assert validate_timestamp(mtp - 5, chain, check_future=False) is False
+
+
+def test_validate_timestamp_rejects_far_future():
+    import time
+    chain = _make_fake_chain([0, 1, 2])
+    far_future = int(time.time()) + MAX_FUTURE_DRIFT + 100
+    assert validate_timestamp(far_future, chain, check_future=True) is False
+
+
+def test_validate_timestamp_accepts_near_future():
+    import time
+    chain = _make_fake_chain([0, 1, 2])
+    # MAX_FUTURE_DRIFT - 1 seconds from now is within the allowed window
+    near_future = int(time.time()) + MAX_FUTURE_DRIFT - 1
+    assert validate_timestamp(near_future, chain, check_future=True) is True
+
+
+def test_validate_timestamp_empty_chain_always_passes():
+    assert validate_timestamp(12345, [], check_future=False) is True
+
+
+# calculate_next_difficulty
+
+def test_difficulty_unchanged_before_first_interval():
+    # Only genesis + 1 block -> not enough history
+    chain = _make_fake_chain([0, 10], difficulty=20)
+    assert calculate_next_difficulty(chain) == 20
+
+
+def test_difficulty_unchanged_between_boundaries():
+    # 12 blocks (heights 0-11), next_height=12, 12 % 10 = 2 -> no adjustment yet
+    chain = _make_fake_chain(list(range(0, 120, 10)), difficulty=20)
+    assert calculate_next_difficulty(chain) == 20
+
+
+def test_difficulty_increases_when_blocks_are_too_fast():
+    # 20 blocks, 1 s apart (target is 10 s) -> blocks too fast -> raise difficulty
+    # next_height = 20, 20 % 10 = 0, len=20 > 10 -> adjustment fires
+    chain = _make_fake_chain(list(range(20)), difficulty=20)
+    assert calculate_next_difficulty(chain) > 20
+
+
+def test_difficulty_decreases_when_blocks_are_too_slow():
+    # 20 blocks, 1000 s apart (target is 10 s) -> blocks too slow -> lower difficulty
+    chain = _make_fake_chain(list(range(0, 20000, 1000)), difficulty=20)
+    assert calculate_next_difficulty(chain) < 20
+
+
+def test_difficulty_unchanged_at_target_rate():
+    # 20 blocks exactly TARGET_BLOCK_TIME apart.
+    # MTP measures time between the *medians* of two overlapping windows, so the
+    # apparent window duration is slightly shorter than the real one even when
+    # blocks are perfectly on-time (by approx 10 %).  Allow up to +-3 difficulty units.
+    step = TARGET_BLOCK_TIME
+    chain = _make_fake_chain(list(range(0, 20 * step, step)), difficulty=20)
+    result = calculate_next_difficulty(chain)
+    assert abs(result - 20) <= 3
+
+
+def test_difficulty_clamped_at_max_when_blocks_extremely_fast():
+    # 1 s blocks -> raw ratio ≈ 10 -> clamped to MAX_ADJUSTMENT_FACTOR
+    chain = _make_fake_chain(list(range(20)), difficulty=20)
+    result = calculate_next_difficulty(chain)
+    assert result <= round(20 * MAX_ADJUSTMENT_FACTOR)
+
+
+def test_difficulty_clamped_at_min_when_blocks_extremely_slow():
+    # 1000 s blocks -> raw ratio approx 0.01 -> clamped to 1/MAX_ADJUSTMENT_FACTOR
+    chain = _make_fake_chain(list(range(0, 20000, 1000)), difficulty=20)
+    result = calculate_next_difficulty(chain)
+    assert result >= round(20 / MAX_ADJUSTMENT_FACTOR)

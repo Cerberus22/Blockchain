@@ -2,7 +2,7 @@ import time
 import asyncio
 import threading
 
-import state
+import globals as state
 from messages import (
     SubmitTransactionRequest,
     SubmitTransactionResponse,
@@ -23,13 +23,7 @@ from constants import (
     YURIAN_PUBLIC_KEY,
     CHAIN_COMMUNITY_ID,
 )
-from utils import (
-    validate_block,
-    mine_block,
-    async_input,
-    validate_timestamp,
-    calculate_next_difficulty,
-)
+from utils import validate_block, mine_block, async_input, validate_timestamp, calculate_next_difficulty
 
 from ipv8.peer import Peer
 from ipv8.community import Community, CommunitySettings
@@ -42,21 +36,13 @@ class BlockchainCommunity(Community):
 
     def __init__(self, settings: CommunitySettings) -> None:
         super().__init__(settings)
-        self.add_message_handler(
-            SubmitTransactionRequest, self.on_submit_transaction_request
-        )
-        self.add_message_handler(
-            SubmitTransactionResponse, self.on_submit_transaction_response
-        )
+        self.add_message_handler(SubmitTransactionRequest, self.on_submit_transaction_request)
+        self.add_message_handler(SubmitTransactionResponse, self.on_submit_transaction_response)
         self.add_message_handler(GetBlockResponse, self.on_get_block_response)
-        self.add_message_handler(
-            GetChainHeightResponse, self.on_get_chain_height_response
-        )
+        self.add_message_handler(GetChainHeightResponse, self.on_get_chain_height_response)
         self.add_message_handler(BlockAnnouncementMessage, self.on_block_announcement)
         self.add_message_handler(ChangedDifficultyMessage, self.on_changed_difficulty)
-        self.add_message_handler(
-            GetChainHeightRequest, self.on_get_chain_height_request
-        )
+        self.add_message_handler(GetChainHeightRequest, self.on_get_chain_height_request)
         self.add_message_handler(GetBlockRequest, self.on_get_block_request)
         self.add_message_handler(EntireChainRequest, self.on_entire_chain_request)
         self.add_message_handler(EntireChainResponse, self.on_entire_chain_response)
@@ -107,9 +93,7 @@ class BlockchainCommunity(Community):
         )
 
     @lazy_wrapper(GetChainHeightResponse)
-    def on_get_chain_height_response(
-        self, peer: Peer, payload: GetChainHeightResponse
-    ) -> None:
+    def on_get_chain_height_response(self, peer: Peer, payload: GetChainHeightResponse) -> None:
         print(
             f"Get Chain Height Response from {peer}:"
             f"\n\trequest_id={payload.request_id}"
@@ -118,9 +102,7 @@ class BlockchainCommunity(Community):
         )
 
     @lazy_wrapper(GetChainHeightRequest)
-    def on_get_chain_height_request(
-        self, peer: Peer, payload: GetChainHeightRequest
-    ) -> None:
+    def on_get_chain_height_request(self, peer: Peer, payload: GetChainHeightRequest) -> None:
         tip = state.blockchain[-1]
         self._safe_ez_send(
             peer,
@@ -132,9 +114,7 @@ class BlockchainCommunity(Community):
         )
 
     @lazy_wrapper(SubmitTransactionResponse)
-    def on_submit_transaction_response(
-        self, peer: Peer, payload: SubmitTransactionResponse
-    ) -> None:
+    def on_submit_transaction_response(self, peer: Peer, payload: SubmitTransactionResponse) -> None:
         print(
             f"Submit Transaction Response from {peer}:"
             f"\n\tsuccess={payload.success}"
@@ -143,9 +123,7 @@ class BlockchainCommunity(Community):
         )
 
     @lazy_wrapper(SubmitTransactionRequest)
-    def on_submit_transaction_request(
-        self, peer: Peer, payload: SubmitTransactionRequest
-    ):
+    def on_submit_transaction_request(self, peer: Peer, payload: SubmitTransactionRequest):
         t = Transaction()
         t.sender_key = payload.sender_key
         t.data = payload.data
@@ -167,28 +145,17 @@ class BlockchainCommunity(Community):
 
         if success:
             state.mempool.add(t)
-            print(
-                f"Added transaction from {peer} to mempool. Mempool size: {len(state.mempool)}"
-            )
+            print(f"Added transaction from {peer} to mempool. Mempool size: {len(state.mempool)}")
 
-        self._safe_ez_send(
-            peer,
-            SubmitTransactionResponse(
-                success=success, tx_hash=t.hash(), message=message
-            ),
-        )
+        self._safe_ez_send(peer, SubmitTransactionResponse(success=success, tx_hash=t.hash(), message=message))
 
     @lazy_wrapper(ChangedDifficultyMessage)
-    def on_changed_difficulty(
-        self, peer: Peer, payload: ChangedDifficultyMessage
-    ) -> None:
+    def on_changed_difficulty(self, peer: Peer, payload: ChangedDifficultyMessage) -> None:
         state.difficulty = payload.new_difficulty
         print(f"Difficulty changed to {state.difficulty}")
 
     @lazy_wrapper(BlockAnnouncementMessage)
-    async def on_block_announcement(
-        self, peer: Peer, payload: BlockAnnouncementMessage
-    ) -> None:
+    async def on_block_announcement(self, peer: Peer, payload: BlockAnnouncementMessage) -> None:
         # Our chain is longer — inform the peer
         if payload.height < len(state.blockchain) - 1:
             print(
@@ -197,10 +164,7 @@ class BlockchainCommunity(Community):
             )
             self._safe_ez_send(
                 peer,
-                BlockAnnouncementMessage(
-                    height=len(state.blockchain) - 1,
-                    block=state.blockchain[-1].to_bytes(),
-                ),
+                BlockAnnouncementMessage(height=len(state.blockchain) - 1, block=state.blockchain[-1].to_bytes()),
             )
             return
 
@@ -212,14 +176,10 @@ class BlockchainCommunity(Community):
             if peerkey in state.new_chain:
                 age = time.time() - state.new_chain[peerkey].get("ts", 0)
                 if age < state.FETCH_TIMEOUT:
-                    print(
-                        f"Already catching up from {peer}; ignoring new announcement for {payload.height}"
-                    )
+                    print(f"Already catching up from {peer}; ignoring new announcement for {payload.height}")
                     return
                 else:
-                    print(
-                        f"Fetch from {peer} stale (age={int(age)}s); restarting catch-up"
-                    )
+                    print(f"Fetch from {peer} stale (age={int(age)}s); restarting catch-up")
                     state.new_chain.pop(peerkey)
 
             state.new_chain[peerkey] = {
@@ -229,9 +189,7 @@ class BlockchainCommunity(Community):
                 "ts": time.time(),
             }
             state.do_mine = False
-            self._safe_ez_send(
-                peer, EntireChainRequest(request_id=0, height=payload.height)
-            )
+            self._safe_ez_send(peer, EntireChainRequest(request_id=0, height=payload.height))
             print(f"Requested block {payload.height} from {peer} (working backwards)")
             return
 
@@ -240,34 +198,23 @@ class BlockchainCommunity(Community):
         block.height = payload.height
 
         if not validate_block(block, state.blockchain[-1].hash()):
-            print(
-                f"Ignored invalid block announcement from {peer} with height {payload.height}"
-            )
+            print(f"Ignored invalid block announcement from {peer} with height {payload.height}")
             return
 
         if not validate_timestamp(block.timestamp, state.blockchain):
-            print(
-                f"Ignored block {payload.height} from {peer}: invalid timestamp {block.timestamp}"
-            )
+            print(f"Ignored block {payload.height} from {peer}: invalid timestamp {block.timestamp}")
             return
 
         state.blockchain.append(block)
         for tx in block.txs:
             state.mempool.discard(tx)
-        print(
-            f"Accepted block {payload.height} from {peer}. Chain height is now {len(state.blockchain) - 1}"
-        )
+        print(f"Accepted block {payload.height} from {peer}. Chain height is now {len(state.blockchain) - 1}")
 
     @lazy_wrapper(EntireChainRequest)
     def on_entire_chain_request(self, peer: Peer, payload: EntireChainRequest) -> None:
         print(f"Request received for height {payload.height}")
         if payload.height < 0 or payload.height >= len(state.blockchain):
-            self.ez_send(
-                peer,
-                EntireChainResponse(
-                    request_id=payload.request_id, total_height=0, height=0, block=b""
-                ),
-            )
+            self.ez_send(peer, EntireChainResponse(request_id=payload.request_id, total_height=0, height=0, block=b""))
             return
         self._safe_ez_send(
             peer,
@@ -280,9 +227,7 @@ class BlockchainCommunity(Community):
         )
 
     @lazy_wrapper(EntireChainResponse)
-    def on_entire_chain_response(
-        self, peer: Peer, payload: EntireChainResponse
-    ) -> None:
+    def on_entire_chain_response(self, peer: Peer, payload: EntireChainResponse) -> None:
         if payload.total_height == 0:
             state.do_mine = True
             return
@@ -298,7 +243,6 @@ class BlockchainCommunity(Community):
             state.new_chain[peerkey]["ts"] = time.time()
         except Exception as e:
             import traceback
-
             print(f"ERROR deserializing block {payload.height}: {e}")
             traceback.print_exc()
             state.do_mine = True
@@ -313,15 +257,11 @@ class BlockchainCommunity(Community):
                 for i, b in enumerate(fetched_blocks):
                     b.height = payload.height + 1 + i
 
-                candidate_chain = (
-                    state.blockchain[: payload.height + 1] + fetched_blocks
-                )
+                candidate_chain = state.blockchain[: payload.height + 1] + fetched_blocks
                 chain_correct = self.validate_chain(candidate_chain)
                 if chain_correct and len(candidate_chain) > len(state.blockchain):
                     state.blockchain = candidate_chain
-                    print(
-                        f"Replaced local chain with new chain from {peer} of length {len(state.blockchain) - 1}"
-                    )
+                    print(f"Replaced local chain with new chain from {peer} of length {len(state.blockchain) - 1}")
                     for i in range(len(state.blockchain)):
                         state.blockchain[i].height = i
                 else:
@@ -334,12 +274,7 @@ class BlockchainCommunity(Community):
                 return
 
         if payload.height > 0:
-            self._safe_ez_send(
-                peer,
-                EntireChainRequest(
-                    request_id=payload.request_id + 1, height=payload.height - 1
-                ),
-            )
+            self._safe_ez_send(peer, EntireChainRequest(request_id=payload.request_id + 1, height=payload.height - 1))
         else:
             print(f"Reached block 0 without finding common ancestor with {peer}")
             state.new_chain.pop(peerkey)
@@ -360,9 +295,11 @@ class BlockchainCommunity(Community):
                 tip.timestamp + 1,
                 max((tx.timestamp for tx in txs), default=0),
             )
-            candidate.difficulty = (
-                calculate_next_difficulty(state.blockchain) or state.difficulty
-            )
+            next_difficulty = calculate_next_difficulty(state.blockchain) or state.difficulty
+            if next_difficulty != state.difficulty:
+                print(f"Adaptive difficulty: {state.difficulty} -> {next_difficulty}")
+                state.difficulty = next_difficulty
+            candidate.difficulty = state.difficulty
             candidate.nonce = 0
             candidate.height = tip.height + 1
 
@@ -375,9 +312,7 @@ class BlockchainCommunity(Community):
             for tx in txs:
                 state.mempool.discard(tx)
 
-            print(
-                f"Mined block {len(state.blockchain) - 1} with {len(txs)} txs and difficulty {mined_block.difficulty}"
-            )
+            print(f"Mined block {len(state.blockchain) - 1} with {len(txs)} txs and difficulty {mined_block.difficulty}")
             asyncio.run_coroutine_threadsafe(self._broadcast_block(mined_block), loop)
 
     def _mine_one_block(self, loop: asyncio.AbstractEventLoop) -> None:
@@ -392,9 +327,7 @@ class BlockchainCommunity(Community):
             tip.timestamp + 1,
             max((tx.timestamp for tx in txs), default=0),
         )
-        candidate.difficulty = (
-            calculate_next_difficulty(state.blockchain) or state.difficulty
-        )
+        candidate.difficulty = calculate_next_difficulty(state.blockchain) or state.difficulty
         candidate.nonce = 0
         candidate.height = tip.height + 1
 
@@ -424,33 +357,15 @@ class BlockchainCommunity(Community):
         t.start()
 
     async def find_peers(self) -> None:
-        print(
-            f"=== Blockchain Community Peers: {len(self.get_peers())} === {time.ctime()} ==="
-        )
+        print(f"=== Blockchain Community Peers: {len(self.get_peers())} === {time.ctime()} ===")
         for peer in self.get_peers():
             print(
                 peer,
                 f"...{peer.public_key.key_to_bin().hex()[-10:]}",
-                (
-                    " <-- SERVER"
-                    if peer.public_key.key_to_bin() == SERVER_PUBLIC_KEY
-                    else ""
-                ),
-                (
-                    " <-- Aiste"
-                    if peer.public_key.key_to_bin() == AISTE_PUBLIC_KEY
-                    else ""
-                ),
-                (
-                    " <-- Aykut"
-                    if peer.public_key.key_to_bin() == AYKUT_PUBLIC_KEY
-                    else ""
-                ),
-                (
-                    " <-- Yurian"
-                    if peer.public_key.key_to_bin() == YURIAN_PUBLIC_KEY
-                    else ""
-                ),
+                " <-- SERVER" if peer.public_key.key_to_bin() == SERVER_PUBLIC_KEY else "",
+                " <-- Aiste" if peer.public_key.key_to_bin() == AISTE_PUBLIC_KEY else "",
+                " <-- Aykut" if peer.public_key.key_to_bin() == AYKUT_PUBLIC_KEY else "",
+                " <-- Yurian" if peer.public_key.key_to_bin() == YURIAN_PUBLIC_KEY else "",
             )
 
     async def submit_transaction(self) -> None:
@@ -474,9 +389,7 @@ class BlockchainCommunity(Community):
         state.difficulty = int(await async_input("New difficulty: "))
         print(f"Difficulty set to {state.difficulty}")
         for peer in self.get_peers():
-            self._safe_ez_send(
-                peer, ChangedDifficultyMessage(new_difficulty=state.difficulty)
-            )
+            self._safe_ez_send(peer, ChangedDifficultyMessage(new_difficulty=state.difficulty))
 
     async def speed_mine(self) -> None:
         old_difficulty = state.difficulty
@@ -511,9 +424,7 @@ class BlockchainCommunity(Community):
         for i in range(1, len(chain)):
             if not validate_block(chain[i], chain[i - 1].hash(), do_print=True):
                 return False
-            if not validate_timestamp(
-                chain[i].timestamp, chain[:i], check_future=False
-            ):
+            if not validate_timestamp(chain[i].timestamp, chain[:i], check_future=False):
                 print(f"Invalid timestamp at block {i}: ts={chain[i].timestamp}")
                 return False
         return chain[0].hash() == state.genesis_block.hash()

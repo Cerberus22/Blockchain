@@ -3,7 +3,7 @@ from custom_types import Block, Transaction
 from utils import (
     validate_block, mine_block, leading_zero_bits,
     validate_timestamp, calculate_next_difficulty, get_median_time_past,
-    ADJUSTMENT_INTERVAL, TARGET_BLOCK_TIME, MAX_ADJUSTMENT_FACTOR, MAX_FUTURE_DRIFT,
+    ADJUSTMENT_INTERVAL, TARGET_BLOCK_TIME, MAX_ADJUSTMENT_BITS, MAX_DIFFICULTY, MAX_FUTURE_DRIFT,
 )
 from ipv8.keyvault.crypto import ECCrypto
 
@@ -402,38 +402,38 @@ def test_difficulty_unchanged_between_boundaries():
 
 
 def test_difficulty_increases_when_blocks_are_too_fast():
-    # 20 blocks, 1 s apart (target is 10 s) -> blocks too fast -> raise difficulty
-    # next_height = 20, 20 % 10 = 0, len=20 > 10 -> adjustment fires
-    chain = _make_fake_chain(list(range(20)), difficulty=20)
+    # 30 blocks, 1 s apart (target is 10 s) -> blocks too fast -> raise difficulty
+    # 30 blocks needed so start_idx=19 >= MTP_WINDOW-1=10 (MTP guard passes)
+    chain = _make_fake_chain(list(range(30)), difficulty=20)
     assert calculate_next_difficulty(chain) > 20
 
 
 def test_difficulty_decreases_when_blocks_are_too_slow():
-    # 20 blocks, 1000 s apart (target is 10 s) -> blocks too slow -> lower difficulty
-    chain = _make_fake_chain(list(range(0, 20000, 1000)), difficulty=20)
+    # 30 blocks, 1000 s apart (target is 10 s) -> blocks too slow -> lower difficulty
+    chain = _make_fake_chain(list(range(0, 30000, 1000)), difficulty=20)
     assert calculate_next_difficulty(chain) < 20
 
 
 def test_difficulty_unchanged_at_target_rate():
-    # 20 blocks exactly TARGET_BLOCK_TIME apart.
-    # MTP measures time between the *medians* of two overlapping windows, so the
+    # 30 blocks exactly TARGET_BLOCK_TIME apart.
+    # MTP measures time between the medians of two overlapping windows, so the
     # apparent window duration is slightly shorter than the real one even when
     # blocks are perfectly on-time (by approx 10 %).  Allow up to +-3 difficulty units.
     step = TARGET_BLOCK_TIME
-    chain = _make_fake_chain(list(range(0, 20 * step, step)), difficulty=20)
+    chain = _make_fake_chain(list(range(0, 30 * step, step)), difficulty=20)
     result = calculate_next_difficulty(chain)
     assert abs(result - 20) <= 3
 
 
 def test_difficulty_clamped_at_max_when_blocks_extremely_fast():
-    # 1 s blocks -> raw ratio ≈ 10 -> clamped to MAX_ADJUSTMENT_FACTOR
-    chain = _make_fake_chain(list(range(20)), difficulty=20)
+    # 1 s blocks -> ratio 10 -> delta clamped to +MAX_ADJUSTMENT_BITS -> result capped at MAX_DIFFICULTY
+    chain = _make_fake_chain(list(range(30)), difficulty=20)
     result = calculate_next_difficulty(chain)
-    assert result <= round(20 * MAX_ADJUSTMENT_FACTOR)
+    assert result <= MAX_DIFFICULTY
 
 
 def test_difficulty_clamped_at_min_when_blocks_extremely_slow():
-    # 1000 s blocks -> raw ratio approx 0.01 -> clamped to 1/MAX_ADJUSTMENT_FACTOR
-    chain = _make_fake_chain(list(range(0, 20000, 1000)), difficulty=20)
+    # 1000 s blocks -> ratio ~0.01 -> delta clamped to -MAX_ADJUSTMENT_BITS
+    chain = _make_fake_chain(list(range(0, 30000, 1000)), difficulty=20)
     result = calculate_next_difficulty(chain)
-    assert result >= round(20 / MAX_ADJUSTMENT_FACTOR)
+    assert result >= round(20 - MAX_ADJUSTMENT_BITS)

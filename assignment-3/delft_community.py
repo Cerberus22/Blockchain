@@ -1,6 +1,6 @@
 import time
 
-import state
+import globals as state
 from messages import RegisterBlockchainRequest, RegisterBlockchainResponse
 from constants import (
     SERVER_COMMUNITY_ID,

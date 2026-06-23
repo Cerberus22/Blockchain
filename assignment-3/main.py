@@ -12,7 +12,7 @@ import sys
 import asyncio
 from asyncio import run, sleep
 
-import state
+import globals as state
 from constants import SERVER_PUBLIC_KEY
 from utils import async_input
 from blockchain_community import BlockchainCommunity

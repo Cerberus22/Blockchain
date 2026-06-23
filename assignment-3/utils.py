@@ -22,6 +22,7 @@ from ipv8.configuration import (
     WalkerDefinition,
     default_bootstrap_defs,
 )
+import math
 
 
 # Small helpertje
@@ -78,11 +79,12 @@ def mine_block(candidate: Block) -> Block:
         time.sleep(0)
 
 # Extra feature: Adaptive Difficulty
-TARGET_BLOCK_TIME: int = 10 # desired seconds per block
-ADJUSTMENT_INTERVAL: int = 10 # recalculate difficulty every N blocks
-MAX_ADJUSTMENT_FACTOR: float = 4.0 # max multiplier / divisor per adjustment window
-MTP_WINDOW: int = 11 # Median Time Past: look back at most this many blocks
-MAX_FUTURE_DRIFT: int = 10 # seconds a block timestamp may exceed wall-clock time
+TARGET_BLOCK_TIME: int = 10  # desired seconds per block
+ADJUSTMENT_INTERVAL: int = 10  # recalculate difficulty every N blocks
+MAX_ADJUSTMENT_BITS: float = 2.0  # max bits to add or subtract per adjustment window
+MTP_WINDOW: int = 11  # Median Time Past: look back at most this many blocks
+MAX_FUTURE_DRIFT: int = 10  # seconds a block timestamp may exceed wall-clock time
+MAX_DIFFICULTY: int = 22  # hard cap to prevent runaway difficulty
 
 def get_median_time_past(chain: list, tip_index: int) -> int:
     """Return the median timestamp of up to MTP_WINDOW blocks ending at tip_index."""
@@ -110,23 +112,9 @@ def validate_timestamp(candidate_ts: int, chain: list, check_future: bool = True
 
 def calculate_next_difficulty(chain: list) -> int:
     """
-    Clamped proportional difficulty controller.
-
-    At every ADJUSTMENT_INTERVAL boundary (i.e. when the *next* block height
-    is a multiple of ADJUSTMENT_INTERVAL) the difficulty is scaled by:
-
-        ratio = (TARGET_BLOCK_TIME * ADJUSTMENT_INTERVAL) / actual_window_time
-
-    actual_window_time is measured using Median Time Past at both edges of
-    the window, so one miner lying about their timestamp cannot shift the
-    result by more than a few seconds.
-
-    ratio is clamped to [1/MAX_ADJUSTMENT_FACTOR, MAX_ADJUSTMENT_FACTOR] to
-    prevent the controller from overshooting and oscillating when hashpower
-    changes dramatically.
-
-    Returns 0 when the chain is only the genesis block (caller should fall
-    back to a configured default difficulty in that case).
+    Additive (log2-space) difficulty controller.
+    Uses Median Time Past to measure the actual time taken to mine the last ADJUSTMENT_INTERVAL blocks.
+    At every ADJUSTMENT_INTERVAL boundary the difficulty is adjusted by: delta = log2(expected_time / actual_time)
     """
     tip = chain[-1]
     next_height = tip.height + 1
@@ -141,16 +129,23 @@ def calculate_next_difficulty(chain: list) -> int:
 
     end_idx   = len(chain) - 1
     start_idx = end_idx - ADJUSTMENT_INTERVAL
-    if start_idx < 0:               # safety guard (heights out of sync)
+    # Skip adjustment if start_idx doesnt have enough blocks behind it
+    # to find MTP median need at least MTP_WINDOW blocks before start_idx
+    if start_idx < 0:
         return tip.difficulty
 
     mtp_end   = get_median_time_past(chain, end_idx)
     mtp_start = get_median_time_past(chain, start_idx)
 
-    actual_time   = max(mtp_end - mtp_start, 1)   # guard against zero / negative
+    actual_time   = max(mtp_end - mtp_start, 1) # guard against zero / negative
     expected_time = TARGET_BLOCK_TIME * ADJUSTMENT_INTERVAL
 
+    # Adjust additively in log2 space: each bit doubles/halves the work
+    # so 2^delta = ratio and so delta = log2(ratio)
+    # where delta is the number of bits to add/subtract from the current difficulty 
     ratio = expected_time / actual_time
-    ratio = max(1.0 / MAX_ADJUSTMENT_FACTOR, min(MAX_ADJUSTMENT_FACTOR, ratio))
+    delta = math.log2(ratio)
+    delta = max(-MAX_ADJUSTMENT_BITS, min(MAX_ADJUSTMENT_BITS, delta))
 
-    return max(1, round(tip.difficulty * ratio))
+    new_difficulty = max(1, round(tip.difficulty + delta))
+    return min(new_difficulty, MAX_DIFFICULTY)
